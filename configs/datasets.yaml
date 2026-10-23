@@ -1,0 +1,41 @@
+# Column roles (case, activity, timestamp, attributes) come from the
+# benchmark: verenich/dataset_confs.py. Dataset names are the
+# keys used there (e.g. helpdesk, bpic2012w, bpic2011, bpic20151, bpic2017,
+# hospital, traffic_fines).
+#
+# This file only adds what the benchmark does not define and F3 needs:
+# the resource column of each log.
+
+helpdesk:
+  resource_col: Resource
+bpic2012w:
+  resource_col: Resource
+bpic2011:
+  resource_col: Producer code
+bpic20151:
+  resource_col: Resource
+bpic20152:
+  resource_col: Resource
+bpic20153:
+  resource_col: Resource
+bpic20154:
+  resource_col: Resource
+bpic20155:
+  resource_col: Resource
+bpic2017:
+  resource_col: Resource
+hospital:
+  resource_col: Resource
+traffic_fines:
+  resource_col: Resource
+bpic2012a:
+  resource_col: Resource
+bpic2012o:
+  resource_col: Resource
+invoice:
+  resource_col: Resource
+production:
+  resource_col: Resource
+sepsis:
+  resource_col: org:group
+

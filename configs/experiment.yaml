@@ -1,0 +1,72 @@
+# Settings shared by all logs and all feature-group variants.
+
+# Changes to the column roles in verenich/dataset_confs.py.
+verenich_overrides:
+  # open_cases belongs to B and F3; calendar attributes belong to F2 and are
+  # computed from the last event of the prefix only.
+  drop_columns: [open_cases, month, weekday, hour, timesincemidnight]
+  # dataset_confs.py refers to "activity_name", which the CSVs call "Activity".
+  rename_columns: {activity_name: Activity, "Activity code": Activity}
+
+# Warm-up and cool-down removal (method of the cbf repository): keep the
+# prediction points whose tau lies in the period where the daily number of
+# active cases exceeds the q_level quantile. Set to null to disable.
+trimming:
+  interval: 1D
+  q_level: 0.2
+
+split:
+  train_ratio: 0.8        # benchmark: temporal split on case start time
+  val_ratio: 0.2          # last share of training cases: early stopping (XGBoost, LSTM) and selection of period and k
+
+prefixes:
+  # benchmark: prefixes of length 1 .. min(20, 0.9 quantile of case lengths)
+  min_length: 1
+  max_length_cap: 20
+  max_length_quantile: 0.9
+  # The benchmark also evaluates complete traces (remaining time 0).
+  # We drop them, since the case has finished at that point.
+  drop_complete_traces: true
+
+# XGBoost (experiment_lag.py --model xgb, the default)
+model:
+  log_target: true        # train on log1p(remaining seconds)
+  n_estimators: 3000
+  early_stopping_rounds: 100
+  learning_rate: 0.05
+  max_depth: 6
+  min_child_weight: 1
+  subsample: 0.8
+  colsample_bytree: 0.8
+  tree_method: hist
+  n_jobs: 8
+
+# Random forest (experiment_lag.py --model rf); fixed hyperparameters, no early stopping
+rf:
+  log_target: true        # train on log1p(remaining seconds), as XGBoost
+  n_estimators: 300
+  min_samples_leaf: 5
+  max_features: 0.33      # share of the features tried at each split
+  n_jobs: 8
+
+# LSTM (experiment_lag.py --model lstm): event sequence of the prefix, inter-case
+# features joined with the last hidden state. Architecture from the grid of the
+# benchmark of Verenich et al. (units {100, 200}, layers {1, 2, 3}, batch {8, 32},
+# Nadam or RMSprop); dropout and gradient clipping as in the code of Tax et al.
+# Runs on the GPU if one is visible; start with CUDA_VISIBLE_DEVICES= to use the CPU.
+lstm:
+  units: 100
+  layers: 2
+  batch_size: 32
+  learning_rate: 0.002
+  dropout: 0.2
+  clip_value: 3.0
+  max_epochs: 100
+  patience: 15            # early stopping on the validation MAE (epochs)
+  lr_patience: 5          # halve the learning rate after this many epochs without improvement
+  max_levels: 50          # one-hot: most frequent values per categorical attribute
+  n_threads: 4            # CPU threads per process
+  gpu: true
+  gpu_memory_fraction: 0.05  # share of the GPU memory per process (shared server)
+
+seeds: [0, 1, 2, 3, 4]    # default; the run xgb_periods used --seeds 10 11 12 13 14
