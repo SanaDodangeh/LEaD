@@ -45,9 +45,9 @@ The implementation of LEaD is in `dyRtp/features/F3_F4_process.py`. It works on 
 
 ### 2.1 Installation
 
+Download or clone this repository, then, from its root folder:
+
 ```bash
-git clone https://github.com/SanaDodangeh/LEaD.git
-cd LEaD
 conda create -n lead python=3.10
 conda activate lead
 pip install -r requirements.txt
