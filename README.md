@@ -40,46 +40,8 @@ The process dynamics features are combined with the other features of each prefi
 
 **Hyperparameters of LEaD:** the number of lags *k* ∈ {2, 7, 14} and, for LEaD-decomposed, the seasonal period *p* ∈ {7, 30} days. Both are selected on the validation set, per log.
 
-## 2. Repository structure
 
-```
-.
-├── configs/
-│   ├── experiment.yaml            # split, prefixes, trimming, column overrides, random forest settings
-│   └── datasets.yaml              # resource column of each log
-├── dyRtp/                         # feature extraction and models
-│   ├── data.py                    # prefixes, labels, temporal split
-│   ├── verenich.py                # wrapper around the benchmark's DatasetManager
-│   ├── utilities.py               # training period, CV and variance fractions of a time series
-│   ├── model.py                   # random forest and XGBoost training
-│   └── features/
-│       ├── F1_case.py             # case-level features of the benchmark (aggregation encoding)
-│       ├── F2_calendar.py         # calendar features of tau (hour, day of week, month)
-│       ├── baseline_snapshot.py   # Base-last: AC, NC, AR at tau
-│       └── F3_F4_process.py       # LEaD: time series, expanding-window STL, lag encoding
-├── verenich/                      # code of the benchmark of Verenich et al. (dataset_confs.py, encoders, LSTM)
-├── evaluation/
-│   ├── experiment_lag.py          # preparation of the logs (prefixes, time series, decomposition)
-│   ├── run_experiment.py          # shared helpers (configuration, feature groups)
-│   ├── select_on_validation.py    # selection helpers used by experiment_lag.py
-│   ├── run_bagg_baseline.py       # Base-agg and Base-index features
-│   ├── test_baseline_agg.py       # check: our aggregation equals the benchmark's aggregation encoding
-│   ├── hp_tune.py                 # tuning, selection, retraining, testing of RF and XGBoost; statistical tests
-│   ├── run_lstm.py                # LSTM of the benchmark (tf.keras), with calendar and inter-case inputs per event
-│   ├── report.py                  # tables of the paper, gains, variance fractions, correlations
-│   ├── plot_motivation_figure.py  # Figure 1 (BPIC15-4)
-│   ├── describe_trimmed_logs.py   # Table 1 (log properties)
-│   └── results/
-│       ├── runs/                  # raw results of every run (tuning, selection, retraining)
-│       └── report/                # tables, CSVs and figures of the paper
-├── data/
-│   ├── raw/                       # event logs of the benchmark (CSV), see Section 4
-│   └── prepared/                  # prefixes, time series, decomposition, baseline features (cached)
-└── docs/
-    └── lead_overview.png
-```
-
-## 3. Set up the Python environments
+## 2. Set up the Python environments
 
 We use two conda environments, with the exact package versions of our runs: one for data preparation, LEaD, the tree-based models, and the analysis, and one with TensorFlow for the LSTM of the benchmark. They are separate because they need different major versions of NumPy and pandas.
 
@@ -113,7 +75,7 @@ pip install -r requirements_lstm.txt
 
 All commands below are run from the root of the repository.
 
-## 4. Download the event logs
+## 3. Download the event logs
 
 We use the preprocessed event logs of the benchmark of Verenich et al. ([time-prediction-benchmark](https://github.com/verenich/time-prediction-benchmark)), file `experiments/logdata/logs.zip`. Unzip the CSV files into `data/raw/`:
 
@@ -143,7 +105,7 @@ Of the 17 logs of the benchmark, we exclude *credit* (no resource information) a
 | Sepsis | `sepsis` | 1,035 | 5,176 | 476 |
 | RTFM (Road Traffic Fine Management) | `traffic_fines` | 150,370 | 561,470 | 4,917 |
 
-## 5. Prepare the logs
+## 4. Prepare the logs
 
 ```bash
 python evaluation/experiment_lag.py --prepare-only --periods 7 30 --ks 14
@@ -168,7 +130,7 @@ The settings of this step are in `configs/experiment.yaml`:
 
 All configurations and models use the same prefixes, sets, and labels.
 
-## 6. Compute the baseline features
+## 5. Compute the baseline features
 
 The three baselines represent the same characteristics as LEaD (AC, NC, AR) but encode them as inter-case features of the prefix:
 
@@ -186,7 +148,7 @@ python evaluation/run_bagg_baseline.py
 
 The script checks that the values at the last event of each prefix equal Base-last at τ. Each `check` line it prints should report `0 of ...` prefixes.
 
-## 7. Train and test the tree-based models
+## 6. Train and test the tree-based models
 
 `evaluation/hp_tune.py` trains and tests the random forest and XGBoost with all five configurations (Base-last, Base-agg, Base-index, LEaD-raw, LEaD-decomposed) in three steps:
 
@@ -236,7 +198,7 @@ Runs can be stopped and restarted: finished fits are read from the result files 
 | `mae_table_refit.csv` | Mean and std of the test MAE over the five seeds. |
 | `friedman.csv`, `wilcoxon_all.csv` | Statistical tests over the logs. |
 
-## 8. Train and test the LSTM reference
+## 7. Train and test the LSTM reference
 
 This step uses the LSTM environment (`conda activate lead-lstm`). As a deep learning reference, we use the LSTM of the benchmark (architecture, hyperparameter grid, and training procedure of `train_LSTM.py`, ported to `tf.keras`). It receives, **at each event of the prefix**, the event attributes of the benchmark, the calendar features (`--calendar`), and the three process-level characteristics of LEaD and the baselines: AC (`open_cases` of the benchmark), and NC and AR (`--intercase`). It uses the same prefixes and sets as the tree-based models.
 
@@ -259,7 +221,7 @@ The refit only starts once all 24 combinations of a log are tuned. Results are w
 
 Fixed settings of the benchmark: dropout 0.15, learning rate 0.001, early stopping after 42 epochs without improvement (at most 500 epochs), learning rate halved after 10 epochs without improvement.
 
-## 9. Reproduce the tables and figures of the paper
+## 8. Reproduce the tables and figures of the paper
 
 | Paper | Command | Output |
 |---|---|---|
@@ -280,7 +242,7 @@ How the tables are computed:
 - **Variance fractions:** VF(X) = Var(X) / (Var(T) + Var(S) + Var(R)) of the STL components (*p* = 7) of each characteristic, computed on the windows before the test period only.
 - **Correlations:** Pearson correlation over the 15 logs between the gains of a comparison and the VFs of a characteristic.
 
-## 10. Results
+## 9. Results
 
 Summary of the evaluation on the 15 logs (Section 4.3 of the paper):
 
@@ -291,7 +253,7 @@ Summary of the evaluation on the 15 logs (Section 4.3 of the paper):
 
 The full results, with standard deviations, are in `evaluation/results/report/tables/`.
 
-## 11. Naming: paper vs. code
+## 10. Naming: paper vs. code
 
 | Paper | Code |
 |---|---|
@@ -309,14 +271,4 @@ The full results, with standard deviations, are in `evaluation/results/report/ta
 | RTFM | `traffic_fines` |
 | Hospital Billing | `hospital` |
 
-## 12. Hardware and runtime
 
-All experiments ran on a shared server with two AMD EPYC 7543 processors (64 cores in total) and 503 GB of memory. The random forest and XGBoost ran on 8 CPU threads per model and the LSTM on 2–4 CPU threads per process. Training one model takes from a few seconds (random forest and XGBoost on small logs) to several hours. The LSTM is by far the most expensive: a single combination of its grid can take more than a day on BPIC17 or RTFM (200 units, batch size 8). Since several experiments ran in parallel, these times are approximate.
-
-## 13. Acknowledgements
-
-The data preparation, the encodings of the other features, the baselines' encoding strategies, and the LSTM build on the benchmark of Verenich et al.:
-
-> I. Verenich, M. Dumas, M. La Rosa, F. M. Maggi, and I. Teinemaa. *Survey and cross-benchmark comparison of remaining time prediction methods in business process monitoring.* ACM Transactions on Intelligent Systems and Technology, 10(4), 2019. Code: https://github.com/verenich/time-prediction-benchmark
-
-The removal of warm-up and cool-down periods follows Kraus et al. (*Data-driven assessment of business process resilience*, Process Science, 2024).
