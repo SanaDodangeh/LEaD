@@ -49,24 +49,5 @@ rf:
   max_features: 0.33      # share of the features tried at each split
   n_jobs: 8
 
-# LSTM (experiment_lag.py --model lstm): event sequence of the prefix, inter-case
-# features joined with the last hidden state. Architecture from the grid of the
-# benchmark of Verenich et al. (units {100, 200}, layers {1, 2, 3}, batch {8, 32},
-# Nadam or RMSprop); dropout and gradient clipping as in the code of Tax et al.
-# Runs on the GPU if one is visible; start with CUDA_VISIBLE_DEVICES= to use the CPU.
-lstm:
-  units: 100
-  layers: 2
-  batch_size: 32
-  learning_rate: 0.002
-  dropout: 0.2
-  clip_value: 3.0
-  max_epochs: 100
-  patience: 15            # early stopping on the validation MAE (epochs)
-  lr_patience: 5          # halve the learning rate after this many epochs without improvement
-  max_levels: 50          # one-hot: most frequent values per categorical attribute
-  n_threads: 4            # CPU threads per process
-  gpu: true
-  gpu_memory_fraction: 0.05  # share of the GPU memory per process (shared server)
 
 seeds: [0, 1, 2, 3, 4]    # default; the run xgb_periods used --seeds 10 11 12 13 14

@@ -1,93 +1,322 @@
-# LEaD
+# LEaD: Lag Encoding of Process Dynamics for Remaining Time Prediction
 
+This repository is the supplementary material of the paper *"LEaD: Lag Encoding of Process Dynamics for Remaining Time Prediction"*. It contains the code, the configurations, and the results needed to reproduce all experiments, tables, and figures of the paper.
 
+**LEaD** encodes recent *process dynamics* as features for remaining time prediction. It tracks process-level characteristics (e.g., the number of active cases) at regular time intervals, **independently of when individual cases record events**. It then encodes the most recent values of these time series, either directly (**LEaD-raw**) or after decomposing them into a trend, a seasonal pattern, and irregular fluctuations (**LEaD-decomposed**). LEaD provides features, not a model, so it can be combined with any predictive model. The paper uses a random forest and XGBoost.
 
-## Getting started
+<p align="center">
+  <img src="docs/lead_overview.png" alt="Overview of LEaD within the remaining time prediction pipeline" width="850">
+</p>
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Contents
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+1. [Overview of the approach](#1-overview-of-the-approach)
+2. [Repository structure](#2-repository-structure)
+3. [Set up the Python environments](#3-set-up-the-python-environments)
+4. [Download the event logs](#4-download-the-event-logs)
+5. [Prepare the logs (prefixes, time series, decomposition)](#5-prepare-the-logs)
+6. [Compute the baseline features](#6-compute-the-baseline-features)
+7. [Train and test the tree-based models (random forest, XGBoost)](#7-train-and-test-the-tree-based-models)
+8. [Train and test the LSTM reference](#8-train-and-test-the-lstm-reference)
+9. [Reproduce the tables and figures of the paper](#9-reproduce-the-tables-and-figures-of-the-paper)
+10. [Results](#10-results)
+11. [Naming: paper vs. code](#11-naming-paper-vs-code)
+12. [Hardware and runtime](#12-hardware-and-runtime)
+13. [Acknowledgements](#13-acknowledgements)
 
-## Add your files
+---
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## 1. Overview of the approach
+
+For a prefix of a running case with prediction timepoint τ (the timestamp of its last event), LEaD works in three steps:
+
+| Step | What it does | Configurations |
+|---|---|---|
+| **Construct process-level time series** | Divides the time span of the log into consecutive windows of one day (time-based tumbling windows) and measures three process-level characteristics per window: **new case count (NC)**, **active case count (AC)**, and **active resource count (AR)**. | both |
+| **Decompose time series** | Decomposes each time series with STL into trend (T), seasonal (S), and residual (R) components. For each window *t*, STL is fitted on the series **from the first window of the log up to *t*** (expanding window), so no information after the prediction timepoint is used. Requires at least two seasonal periods (2*p* windows). | LEaD-decomposed only |
+| **Encode process dynamics** | Encodes the last *k* completed windows before τ (the *lags*): their raw values (LEaD-raw, *k* features per characteristic) or their T, S, and R components (LEaD-decomposed, 3*k* features per characteristic). | both |
+
+The process dynamics features are combined with the other features of each prefix (case attributes, aggregated event attributes, and calendar features) and passed to the predictive model. All prefixes whose prediction timepoint falls into the same day receive the same process dynamics features. The history LEaD encodes therefore does not depend on how long a case has been running: a prefix of a single event also receives *k* days of history.
+
+**Hyperparameters of LEaD:** the number of lags *k* ∈ {2, 7, 14} and, for LEaD-decomposed, the seasonal period *p* ∈ {7, 30} days. Both are selected on the validation set, per log.
+
+## 2. Repository structure
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.cs.univie.ac.at/sanad95cs/lead.git
-git branch -M main
-git push -uf origin main
+.
+├── configs/
+│   ├── experiment.yaml            # split, prefixes, trimming, column overrides, random forest settings
+│   └── datasets.yaml              # resource column of each log
+├── dyRtp/                         # feature extraction and models
+│   ├── data.py                    # prefixes, labels, temporal split
+│   ├── verenich.py                # wrapper around the benchmark's DatasetManager
+│   ├── utilities.py               # training period, CV and variance fractions of a time series
+│   ├── model.py                   # random forest and XGBoost training
+│   └── features/
+│       ├── F1_case.py             # case-level features of the benchmark (aggregation encoding)
+│       ├── F2_calendar.py         # calendar features of tau (hour, day of week, month)
+│       ├── baseline_snapshot.py   # Base-last: AC, NC, AR at tau
+│       └── F3_F4_process.py       # LEaD: time series, expanding-window STL, lag encoding
+├── verenich/                      # code of the benchmark of Verenich et al. (dataset_confs.py, encoders, LSTM)
+├── evaluation/
+│   ├── experiment_lag.py          # preparation of the logs (prefixes, time series, decomposition)
+│   ├── run_experiment.py          # shared helpers (configuration, feature groups)
+│   ├── select_on_validation.py    # selection helpers used by experiment_lag.py
+│   ├── run_bagg_baseline.py       # Base-agg and Base-index features
+│   ├── test_baseline_agg.py       # check: our aggregation equals the benchmark's aggregation encoding
+│   ├── hp_tune.py                 # tuning, selection, retraining, testing of RF and XGBoost; statistical tests
+│   ├── run_lstm.py                # LSTM of the benchmark (tf.keras), with calendar and inter-case inputs per event
+│   ├── report.py                  # tables of the paper, gains, variance fractions, correlations
+│   ├── plot_motivation_figure.py  # Figure 1 (BPIC15-4)
+│   ├── describe_trimmed_logs.py   # Table 1 (log properties)
+│   └── results/
+│       ├── runs/                  # raw results of every run (tuning, selection, retraining)
+│       └── report/                # tables, CSVs and figures of the paper
+├── data/
+│   ├── raw/                       # event logs of the benchmark (CSV), see Section 4
+│   └── prepared/                  # prefixes, time series, decomposition, baseline features (cached)
+└── docs/
+    └── lead_overview.png
 ```
 
-## Integrate with your tools
+## 3. Set up the Python environments
 
-* [Set up project integrations](https://gitlab.cs.univie.ac.at/sanad95cs/lead/-/settings/integrations)
+We use two conda environments, with the exact package versions of our runs: one for data preparation, LEaD, the tree-based models, and the analysis, and one with TensorFlow for the LSTM of the benchmark. They are separate because they need different major versions of NumPy and pandas.
 
-## Collaborate with your team
+**Main environment** (preparation, random forest, XGBoost, statistical tests, tables, figures):
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```bash
+conda create -n lead python=3.10
+conda activate lead
+pip install -r requirements.txt
+```
 
-## Test and Deploy
+**LSTM environment** (only for `evaluation/run_lstm.py`):
 
-Use the built-in continuous integration in GitLab.
+```bash
+conda create -n lead-lstm python=3.11
+conda activate lead-lstm
+pip install -r requirements_lstm.txt
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+| Package | Main (`requirements.txt`, Python 3.10) | LSTM (`requirements_lstm.txt`, Python 3.11) |
+|---|---|---|
+| numpy | 1.26.4 | 2.4.6 |
+| pandas | 2.3.3 | 3.1.0 |
+| scipy | 1.15.2 | |
+| statsmodels | 0.15.0 | |
+| scikit-learn | 1.7.2 | 1.9.1 |
+| xgboost | 3.2.0 | |
+| PyYAML | 6.0.3 | 6.0.3 |
+| matplotlib | 3.10.9 | |
+| tensorflow | | 2.21.0 |
 
-***
+All commands below are run from the root of the repository.
 
-# Editing this README
+## 4. Download the event logs
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+We use the preprocessed event logs of the benchmark of Verenich et al. ([time-prediction-benchmark](https://github.com/verenich/time-prediction-benchmark)), file `experiments/logdata/logs.zip`. Unzip the CSV files into `data/raw/`:
 
-## Suggestions for a good README
+```bash
+mkdir -p data/raw
+# download logs.zip from https://github.com/verenich/time-prediction-benchmark/blob/master/experiments/logdata/logs.zip
+unzip logs.zip -d data/raw/
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Of the 17 logs of the benchmark, we exclude *credit* (no resource information) and *invoice* (its time span is too short for a reliable decomposition). The remaining 15 logs are:
 
-## Name
-Choose a self-explaining name for your project.
+| Log | Code name | Cases | Events | Time span (days) |
+|---|---|---:|---:|---:|
+| BPIC11 | `bpic2011` | 1,140 | 149,730 | 1,172 |
+| BPIC12-A | `bpic2012a` | 12,007 | 53,952 | 152 |
+| BPIC12-O | `bpic2012o` | 3,487 | 15,908 | 165 |
+| BPIC12-W | `bpic2012w` | 9,650 | 72,380 | 165 |
+| BPIC15-1 | `bpic20151` | 696 | 28,775 | 1,611 |
+| BPIC15-2 | `bpic20152` | 753 | 41,202 | 1,704 |
+| BPIC15-3 | `bpic20153` | 1,328 | 57,488 | 1,889 |
+| BPIC15-4 | `bpic20154` | 577 | 24,234 | 1,930 |
+| BPIC15-5 | `bpic20155` | 1,051 | 54,562 | 1,922 |
+| BPIC17 | `bpic2017` | 31,509 | 561,671 | 397 |
+| Helpdesk | `helpdesk` | 3,218 | 10,598 | 982 |
+| Hospital Billing | `hospital` | 59,228 | 330,945 | 1,130 |
+| Production | `production` | 225 | 4,543 | 89 |
+| Sepsis | `sepsis` | 1,035 | 5,176 | 476 |
+| RTFM (Road Traffic Fine Management) | `traffic_fines` | 150,370 | 561,470 | 4,917 |
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## 5. Prepare the logs
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+python evaluation/experiment_lag.py --prepare-only --periods 7 30 --ks 14
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+For each log, this step writes the following to `data/prepared/`:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+- `<log>_table.pkl`: one row per prefix, with its set (train, validation, test), its label (remaining time), the case-level features F1, the calendar features F2, and the Base-last features;
+- `<log>_series.pkl`: the daily time series of AC, NC, and AR over the whole log, and their expanding-window STL components for *p* = 7;
+- `<log>_components_p30.pkl`: the STL components for *p* = 30 (only for logs whose training period covers at least six cycles);
+- `<log>_fit_days.txt`: the length of the fit period.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+The settings of this step are in `configs/experiment.yaml`:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+| Setting | Value | Meaning |
+|---|---|---|
+| `split.train_ratio` | 0.8 | Cases are ordered by start time; the last 20% form the test set. |
+| `split.val_ratio` | 0.2 | The last 20% of the remaining cases form the validation set. |
+| `prefixes.max_length_cap`, `max_length_quantile` | 20, 0.9 | Prefixes of length 1 up to min(20, 0.9 quantile of the case lengths of the log), as in the benchmark. |
+| `prefixes.drop_complete_traces` | true | Complete traces (remaining time 0) are not used. |
+| `trimming.q_level` | 0.2 | Prefixes whose prediction timepoint lies in the warm-up or cool-down period (daily active cases below the 0.2 quantile) are excluded; the windows themselves stay in the time series. |
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+All configurations and models use the same prefixes, sets, and labels.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## 6. Compute the baseline features
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+The three baselines represent the same characteristics as LEaD (AC, NC, AR) but encode them as inter-case features of the prefix:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+| Baseline | Encoding | Features |
+|---|---|---|
+| **Base-last** | Values at τ (AC at τ, NC and AR in the 24 hours before τ); computed in Section 5. | 3 |
+| **Base-agg** | Values at each event of the prefix, aggregated by mean, max, min, sum, std (aggregation encoding of the benchmark). | 15 |
+| **Base-index** | Values at each event of the prefix, one feature per event position (index-based encoding of the benchmark); positions after the end of the prefix are 0. | 3 × max. prefix length |
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Base-agg and Base-index are computed once per log and cached in `data/prepared/<log>_bagg3.pkl` and `<log>_bindex.pkl`:
 
-## License
-For open source projects, say how it is licensed.
+```bash
+python evaluation/run_bagg_baseline.py
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+The script checks that the values at the last event of each prefix equal Base-last at τ. Each `check` line it prints should report `0 of ...` prefixes.
+
+## 7. Train and test the tree-based models
+
+`evaluation/hp_tune.py` trains and tests the random forest and XGBoost with all five configurations (Base-last, Base-agg, Base-index, LEaD-raw, LEaD-decomposed) in three steps:
+
+1. **Hyperparameter selection:** every candidate combination is trained on the training set with one random seed (14) and evaluated on the validation set.
+2. **Selection:** per log and configuration, the combination with the lowest validation MAE is selected.
+3. **Retraining and testing:** the selected combination is retrained on the training and validation sets with five random seeds (10–14) and evaluated on the test set.
+
+```bash
+# XGBoost
+python evaluation/hp_tune.py --model xgb --run-name tune_xgb_s14 --seeds 14 --n-jobs 8
+python evaluation/hp_tune.py --model xgb --run-name tune_xgb_s14 --select --seeds 14
+python evaluation/hp_tune.py --model xgb --run-name tune_xgb_s14 --refit --seeds 10 11 12 13 14 --n-jobs 8
+
+# Random forest
+python evaluation/hp_tune.py --model rf --run-name tune_rf_s14 --seeds 14 --n-jobs 8
+python evaluation/hp_tune.py --model rf --run-name tune_rf_s14 --select --seeds 14
+python evaluation/hp_tune.py --model rf --run-name tune_rf_s14 --refit --seeds 10 11 12 13 14 --n-jobs 8
+```
+
+Candidate values (Table 2 of the paper):
+
+| Applies to | Hyperparameter | Candidate values |
+|---|---|---|
+| XGBoost | grid of the benchmark: `n_estimators`, `learning_rate`, `subsample`, `colsample_bytree`, `max_depth` | 48 combinations |
+| Random forest | `max_features` | {0.33, 1.0}; 300 trees, `min_samples_leaf` 5 |
+| LEaD-raw, LEaD-decomposed | number of lags *k* | {2, 7, 14} |
+| LEaD-decomposed | seasonal period *p* | {7, 30} days |
+
+**Useful options:**
+
+| Option | Effect |
+|---|---|
+| `--datasets helpdesk sepsis` | Only these logs (default: all prepared logs, largest first). |
+| `--variants F1+F2+B F1+F2+F4` | Only these configurations (default: the five of the paper). |
+| `--n-jobs N` | CPU threads per model. |
+| `--friedman` | Only the statistical tests on `refit.csv` (no training). |
+
+Runs can be stopped and restarted: finished fits are read from the result files and skipped. Several processes can work on different logs of the same run in parallel (`--datasets`).
+
+**Output** in `evaluation/results/runs/<run name>/`:
+
+| File | Content |
+|---|---|
+| `all_logs.csv` | Tuning: one row per log, configuration, *p*, *k*, hyperparameter combination; validation and test MAE. |
+| `selected.csv`, `mae_table.csv` | Selected combination per log and configuration. |
+| `refit.csv` | Test MAE of the retrained models, one row per log, configuration, and seed. |
+| `mae_table_refit.csv` | Mean and std of the test MAE over the five seeds. |
+| `friedman.csv`, `wilcoxon_all.csv` | Statistical tests over the logs. |
+
+## 8. Train and test the LSTM reference
+
+This step uses the LSTM environment (`conda activate lead-lstm`). As a deep learning reference, we use the LSTM of the benchmark (architecture, hyperparameter grid, and training procedure of `train_LSTM.py`, ported to `tf.keras`). It receives, **at each event of the prefix**, the event attributes of the benchmark, the calendar features (`--calendar`), and the three process-level characteristics of LEaD and the baselines: AC (`open_cases` of the benchmark), and NC and AR (`--intercase`). It uses the same prefixes and sets as the tree-based models.
+
+The grid has 24 combinations (units {100, 200}, layers {1, 2, 3}, batch size {8, 32}, optimizer {RMSprop, Nadam}). It can be split over several processes with `--part` and `--n-parts`:
+
+```bash
+conda activate lead-lstm
+
+# tuning (seed 14), e.g. the grid of one log split over 6 processes
+for p in 0 1 2 3 4 5; do
+  python evaluation/run_lstm.py --calendar --intercase --datasets hospital --part $p --n-parts 6 --threads 3 &
+done
+wait
+
+# retraining (seeds 10-14, for the number of epochs selected on validation) and testing
+python evaluation/run_lstm.py --calendar --intercase --datasets hospital --refit --threads 3
+```
+
+The refit only starts once all 24 combinations of a log are tuned. Results are written to `evaluation/results/runs/verenich_lstm_f2_intercase/` (`tuning.csv`, `selected.csv`, `refit.csv`).
+
+Fixed settings of the benchmark: dropout 0.15, learning rate 0.001, early stopping after 42 epochs without improvement (at most 500 epochs), learning rate halved after 10 epochs without improvement.
+
+## 9. Reproduce the tables and figures of the paper
+
+| Paper | Command | Output |
+|---|---|---|
+| Table 1 (log properties) | `python evaluation/describe_trimmed_logs.py` | `evaluation/results/report/log_stats_trimmed.csv` |
+| Table 3 (MAE, with standard deviations) | `python evaluation/report.py --tables` | `evaluation/results/report/tables/tab_mae.tex` |
+| Table 4 (Wilcoxon tests) | same | `.../tables/tab_wilcoxon.tex` |
+| Table 5 (correlations of the gains with VF(S)), and with VF(T) and VF(R) | same | `.../tables/tab_corr_gains.tex` |
+| Variance fractions of all logs | same | `.../tables/tab_variance_fractions.tex` |
+| Figure 1 (motivation, BPIC15-4) | `python evaluation/plot_motivation_figure.py --pairs --dataset bpic20154 --series active_cases --paper-pairs 2010-12-30 2014-03-17 2012-10-25 2012-11-29` | `evaluation/results/motivation/` |
+
+`report.py --tables` reads only the `refit.csv` files of the runs; it trains nothing. Next to every `.tex` file it writes the underlying numbers as CSV (`mae.csv`, `wilcoxon.csv`, `corr_gains.csv`, `gains.csv`, `variance_fractions.csv`), so all values of the paper can be checked without LaTeX.
+
+How the tables are computed:
+
+- **MAE:** mean absolute error in days (Sepsis: minutes), mean and standard deviation over the five retrained models. A configuration is reported only if all five seeds are available.
+- **Gain:** the reduction of the mean MAE in percent, (MAE<sub>reference</sub> − MAE<sub>configuration</sub>) / MAE<sub>reference</sub> × 100, per log.
+- **Statistical significance:** one-sided Wilcoxon signed-rank test over the 15 logs on the gains (alternative: the gain is positive), significance level 0.05, without correction for multiple comparisons; effect size: rank-biserial correlation *r*.
+- **Variance fractions:** VF(X) = Var(X) / (Var(T) + Var(S) + Var(R)) of the STL components (*p* = 7) of each characteristic, computed on the windows before the test period only.
+- **Correlations:** Pearson correlation over the 15 logs between the gains of a comparison and the VFs of a characteristic.
+
+## 10. Results
+
+Summary of the evaluation on the 15 logs (Section 4.3 of the paper):
+
+- At least one LEaD configuration is more accurate than all three baselines on **10 of 15 logs with the random forest** and **8 of 15 with XGBoost**. The largest gains are on BPIC11 and Production, where LEaD-decomposed is more than 36% and 15% more accurate than all three baselines with both models.
+- With the random forest, LEaD-decomposed is **significantly more accurate than all three baselines** (one-sided Wilcoxon, *p* ≤ 0.028), and LEaD-raw than Base-agg (*p* = 0.009), with effect sizes between 0.57 and 0.83.
+- The gains of LEaD-decomposed are positively correlated with the **seasonal variance fractions of NC and AR** (0.33–0.49): encoding process dynamics is particularly beneficial when new cases and active resources follow a weekly pattern.
+- A tree-based model with LEaD is more accurate than the LSTM reference on 12 of the 13 logs with LSTM results.
+
+The full results, with standard deviations, are in `evaluation/results/report/tables/`.
+
+## 11. Naming: paper vs. code
+
+| Paper | Code |
+|---|---|
+| Base-last | `F1+F2+B` |
+| Base-agg | `F1+F2+Bagg3` |
+| Base-index | `F1+F2+Bindex` |
+| LEaD-raw | `F1+F2+F3` |
+| LEaD-decomposed | `F1+F2+F4` (in `report.py`: `LEaD-full`) |
+| Other features: case-level features of the benchmark | `F1` |
+| Other features: calendar features of τ | `F2` |
+| Active case count (AC) | `active_cases`, `open_cases` |
+| New case count (NC) | `arrival_rate`, `arrivals` |
+| Active resource count (AR) | `active_resources` |
+| LSTM reference | `Verenich-LSTM+F2+IC` (`run_lstm.py --calendar --intercase`) |
+| RTFM | `traffic_fines` |
+| Hospital Billing | `hospital` |
+
+## 12. Hardware and runtime
+
+All experiments ran on a shared server with two AMD EPYC 7543 processors (64 cores in total) and 503 GB of memory. The random forest and XGBoost ran on 8 CPU threads per model and the LSTM on 2–4 CPU threads per process. Training one model takes from a few seconds (random forest and XGBoost on small logs) to several hours. The LSTM is by far the most expensive: a single combination of its grid can take more than a day on BPIC17 or RTFM (200 units, batch size 8). Since several experiments ran in parallel, these times are approximate.
+
+## 13. Acknowledgements
+
+The data preparation, the encodings of the other features, the baselines' encoding strategies, and the LSTM build on the benchmark of Verenich et al.:
+
+> I. Verenich, M. Dumas, M. La Rosa, F. M. Maggi, and I. Teinemaa. *Survey and cross-benchmark comparison of remaining time prediction methods in business process monitoring.* ACM Transactions on Intelligent Systems and Technology, 10(4), 2019. Code: https://github.com/verenich/time-prediction-benchmark
+
+The removal of warm-up and cool-down periods follows Kraus et al. (*Data-driven assessment of business process resilience*, Process Science, 2024).

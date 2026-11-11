@@ -78,7 +78,6 @@ EXCLUDED_VARIANTS = ["F1+F2+F3+F4"]         # not part of the paper
 MIN_K_RAW = 2      # F3 without F4: at least two daily values (one value is a state, not a change)
 MIN_CYCLES = 6     # as in experiment_lag.py: a period is used only if the fit period covers this many cycles
 BASELINE, NO_INTERCASE = "F1+F2+B", "F1+F2"
-
 # feature sets of the paper: (variant, short name, color, marker, legend text)
 VARIANTS = [("F1+F2+B", "B", "#555555", "s", "B: baseline, snapshot at prediction time"),
             ("F1+F2+F3", "F3", "#0072B2", "o", "F3: observed lags"),
@@ -716,7 +715,82 @@ def plot_time_series(ds, path):
     fig.tight_layout()
     save_figure(fig, path)
 
+# ---------------------------------------------------------------- gains vs. dynamics
+TUNE_RUNS = {"rf": "tune_rf_s14", "xgb": "tune_xgb_s14", "lstm": "tune_lstm_s14"}
+CONFIG_NAMES = {"F1+F2+F3": "LEaD-raw", "F1+F2+F4": "LEaD-full", "F1+F2+F4ts": "LEaD-sys"}
+BASELINE_NAMES = {"F1+F2+B": "Base-last", "F1+F2+Bagg3": "Base-agg", "F1+F2+Bindex": "Base-index"}
+CHARACTERISTIC_NAMES = {"active_cases": "AC", "arrival_rate": "NC", "active_resources": "AR"}
+N_SEEDS = 5
+COMPONENTS = ["cv", "vf_trend", "vf_seasonal", "vf_residual"]
 
+
+def compute_gains(model, configs=("F1+F2+F3", "F1+F2+F4")):
+    """Gain of each LEaD configuration over each baseline per log, in %:
+    (MAE_baseline - MAE_config) / MAE_baseline * 100, on the mean test MAE
+    over the refit seeds (refit.csv of the tuning run of the model). Baselines:
+    Base-last, Base-agg, Base-index (if the model has it), Base (the better of
+    Base-last and Base-agg per log), and LEaD-raw for LEaD-full. A log is left
+    out for a variant with fewer than N_SEEDS seeds."""
+    res = pd.read_csv(os.path.join(RUNS_DIR, TUNE_RUNS[model], "refit.csv"))
+    res = res.drop_duplicates(["dataset", "variant", "seed"], keep="first").astype({"mae": float})
+    stats = res.groupby(["dataset", "variant"])["mae"].agg(["mean", "count"])
+    mae = stats["mean"].where(stats["count"] >= N_SEEDS).unstack()
+    bases = {name: mae[v] for v, name in BASELINE_NAMES.items() if v in mae.columns}  
+    bases["Base"] = mae[["F1+F2+B", "F1+F2+Bagg3"]].min(axis=1, skipna=False)     
+    if "F1+F2+F3" in mae.columns:
+        bases["LEaD-raw"] = mae["F1+F2+F3"]    # reference for the gain of LEaD-full over LEaD-raw
+    rows = []
+    for config in configs:
+        for base, base_mae in bases.items():
+            if CONFIG_NAMES[config] == base:
+                continue
+            for ds in mae.index:
+                rows.append({"model": model, "dataset": ds, "config": CONFIG_NAMES[config],
+                             "baseline": base, "mae_config": mae.loc[ds, config],
+                             "mae_baseline": base_mae[ds],
+                             "gain": 100 * (base_mae[ds] - mae.loc[ds, config]) / base_mae[ds]})
+    return pd.DataFrame(rows).dropna(subset=["gain"])
+
+
+def compute_characteristic_fractions(datasets, period=7, q_level=0.2):
+    """Per log and characteristic (AC, NC, AR): coefficient of variation and
+    variance fractions of the STL components (trend, seasonal, residual,
+    p = period) of the daily series in the training period (after warm-up
+    removal, before the test start)."""
+    rows = []
+    for ds in datasets:
+        with open(os.path.join(PREP_DIR, f"{ds}_series.pkl"), "rb") as f:
+            s = pickle.load(f)
+        for series in select_train_period(s["series"], s["test_start"], q_level):
+            cv = analyze_series_stats(series)["coefficient_of_variation"]
+            rows.append({"dataset": ds, "characteristic": CHARACTERISTIC_NAMES.get(series.name, series.name),
+                         "cv": np.nan if cv is None else float(cv),
+                         **compute_variance_fractions(series, period)})
+    return pd.DataFrame(rows)
+
+
+def correlate_gains(gains, fractions, components=COMPONENTS, characteristics=("AC", "NC", "AR")):
+    """Pearson correlation over the logs between the gains of each (model,
+    config, baseline) and each component (cv, vf_trend, vf_seasonal,
+    vf_residual) of each characteristic. One row per (model, config,
+    baseline, characteristic) with correlation_<component> and
+    p_value_<component>; n = logs with a gain and the characteristic."""
+    from scipy.stats import pearsonr
+    rows = []
+    for (model, config, base), g in gains.groupby(["model", "config", "baseline"], sort=False):
+        for ch in characteristics:
+            x = fractions[fractions["characteristic"] == ch].set_index("dataset")[list(components)]
+            z = g.set_index("dataset")[["gain"]].join(x, how="inner")
+            row = {"model": model, "config": config, "baseline": base, "characteristic": ch,
+                   "n": int(z["gain"].notna().sum())}
+            for c in components:
+                zc = z[["gain", c]].dropna()
+                correlation, p_value = pearsonr(zc["gain"], zc[c]) if len(zc) > 2 else (np.nan, np.nan)
+                row[f"correlation_{c}"], row[f"p_value_{c}"] = correlation, p_value
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", nargs="+", default=["xgb_periods", "rf_periods"],
@@ -725,7 +799,26 @@ def main():
     parser.add_argument("--refresh-characteristics", action="store_true",
                         help="compute the characteristics of the logs again")
     parser.add_argument("--no-time-series", action="store_true", help="skip the time series figures")
+    parser.add_argument("--correlation", action="store_true",
+                        help="gains over each baseline, CV and variance fractions per characteristic, and their Spearman correlation")
+    parser.add_argument("--corr-models", nargs="+", default=["rf", "xgb", "lstm"], choices=list(TUNE_RUNS))
+    parser.add_argument("--tables", action="store_true",
+                        help="write the tables of the paper (.tex and .csv) to results/report/tables/")
     args = parser.parse_args()
+    if args.tables:
+        write_paper_tables()
+        return
+    if args.correlation:
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        gains = pd.concat([compute_gains(m) for m in args.corr_models], ignore_index=True)
+        fractions = compute_characteristic_fractions(sorted(gains["dataset"].unique()))
+        corr = correlate_gains(gains, fractions)
+        gains.to_csv(os.path.join(REPORT_DIR, "gains.csv"), index=False)
+        fractions.to_csv(os.path.join(REPORT_DIR, "characteristic_fractions.csv"), index=False)
+        corr.to_csv(os.path.join(REPORT_DIR, "corr_gains.csv"), index=False)
+        with pd.option_context("display.width", 200, "display.precision", 2):
+            print(corr.to_string(index=False))
+        return
     os.makedirs(REPORT_DIR, exist_ok=True)
     pd.set_option("display.width", 220)
 

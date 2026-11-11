@@ -180,7 +180,10 @@ def prepare_extra_features(X, fit):
 def train_and_predict_lstm(seq, extra, y, fit, val, test, params, seed):
     """Train on the fit prefixes, early stopping on the validation MAE;
     returns the predictions for test (seconds) and an info dict as
-    dyRtp.model.train_and_predict does."""
+    dyRtp.model.train_and_predict does. params["optimizer"]: "nadam"
+    (default) or "rmsprop". With params["fixed_epochs"], the model is trained
+    for exactly this many epochs without validation (val may be empty), e.g.
+    to retrain on the whole training set after the selection."""
     import torch
     import torch.nn as nn
 
@@ -223,12 +226,17 @@ def train_and_predict_lstm(seq, extra, y, fit, val, test, params, seed):
 
     model = SequenceRegressor(events.shape[1], extra.shape[1], params["units"], params["layers"],
                               params["dropout"]).to(device)
-    opt = torch.optim.NAdam(model.parameters(), lr=params["learning_rate"])
+    if params.get("optimizer", "nadam").lower() == "rmsprop":
+        opt = torch.optim.RMSprop(model.parameters(), lr=params["learning_rate"])
+    else:
+        opt = torch.optim.NAdam(model.parameters(), lr=params["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=params["lr_patience"])
     loss_fn = nn.L1Loss()
     fit_idx, val_idx, test_idx = (torch.from_numpy(np.where(m)[0]).to(device) for m in (fit, val, test))
 
     def predict(idx):
+        if len(idx) == 0:
+            return np.zeros(0)
         model.eval()
         out = []
         with torch.no_grad():
@@ -239,8 +247,9 @@ def train_and_predict_lstm(seq, extra, y, fit, val, test, params, seed):
         return np.clip(np.expm1(np.concatenate(out) * sd + mu), 0, None)
 
     start = time.time()
-    best, best_state, wait, epochs = np.inf, None, 0, 0
-    for epoch in range(params["max_epochs"]):
+    fixed_epochs = params.get("fixed_epochs")
+    best, best_state, wait, epochs, best_epoch = np.inf, None, 0, 0, 0
+    for epoch in range(int(fixed_epochs) if fixed_epochs else params["max_epochs"]):
         model.train()
         perm = fit_idx[torch.randperm(len(fit_idx), device=device)]
         for b in range(0, len(perm), params["batch_size"]):
@@ -251,20 +260,24 @@ def train_and_predict_lstm(seq, extra, y, fit, val, test, params, seed):
             loss.backward()
             nn.utils.clip_grad_value_(model.parameters(), params["clip_value"])
             opt.step()
+        epochs = epoch + 1
+        if fixed_epochs:            # no validation: keep the model after the last epoch
+            continue
         mae = float(np.mean(np.abs(predict(val_idx) - y[val])))
         scheduler.step(mae)
-        epochs = epoch + 1
         if mae < best - 1e-9:
-            best, wait = mae, 0
+            best, wait, best_epoch = mae, 0, epochs
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         else:
             wait += 1
             if wait >= params["patience"]:
                 break
-    model.load_state_dict(best_state)
+    if best_state is not None:
+        model.load_state_dict(best_state)
     train_time = time.time() - start
     start = time.time()
     pred = predict(test_idx)
     predict_time = time.time() - start
     return pred, model, {"train_time_s": train_time, "predict_time_s": predict_time,
-                         "best_iteration": epochs, "pred_val": predict(val_idx)}
+                         "best_iteration": epochs, "best_epoch": best_epoch or epochs,
+                         "pred_val": predict(val_idx)}
