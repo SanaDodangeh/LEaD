@@ -1,0 +1,24 @@
+\begin{table}[!htbp]
+\centering
+\caption{One-sided Wilcoxon signed-rank tests over the 15 logs on the gain of the first configuration over the second (alternative: the gain is positive), without correction for multiple comparisons. $r$: rank-biserial correlation.}
+\label{tab:wilcoxon}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{\textbf{Random forest}} & \multicolumn{2}{c}{\textbf{XGBoost}} \\
+\cmidrule(lr){2-3} \cmidrule(l){4-5}
+Comparison & $p$ & $r$ & $p$ & $r$ \\
+\midrule
+LEaD-raw $>$ Base-last & 0.319 & 0.15 & 0.227 & 0.23 \\
+LEaD-raw $>$ Base-agg & 0.009 & 0.68 & 0.180 & 0.28 \\
+LEaD-raw $>$ Base-index & 0.053 & 0.48 & 0.262 & 0.20 \\
+\addlinespace[2pt]
+LEaD-decomposed $>$ Base-last & 0.028 & 0.57 & 0.445 & 0.05 \\
+LEaD-decomposed $>$ Base-agg & 0.001 & 0.83 & 0.281 & 0.18 \\
+LEaD-decomposed $>$ Base-index & 0.015 & 0.63 & 0.195 & 0.27 \\
+\addlinespace[2pt]
+LEaD-decomposed $>$ LEaD-raw & 0.211 & 0.25 & 0.445 & 0.05 \\
+\bottomrule
+\end{tabular}
+\end{table}

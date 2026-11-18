@@ -790,6 +790,236 @@ def correlate_gains(gains, fractions, components=COMPONENTS, characteristics=("A
             rows.append(row)
     return pd.DataFrame(rows)
 
+# ---------------------------------------------------------------- tables of the paper
+TABLE_DIR = os.path.join(REPORT_DIR, "tables")
+LSTM_RUN = "verenich_lstm_f2_intercase"            # run of the LSTM column of the MAE table
+TREE_MODELS = {"rf": "Random forest", "xgb": "XGBoost"}
+TABLE_VARIANTS = [("F1+F2+B", "Last"), ("F1+F2+Bagg3", "Agg"), ("F1+F2+Bindex", "Index"),
+                  ("F1+F2+F3", "Raw"), ("F1+F2+F4", "Decomposed")]
+TABLE_BASELINES = ["F1+F2+B", "F1+F2+Bagg3", "F1+F2+Bindex"]
+TABLE_LEAD = ["F1+F2+F3", "F1+F2+F4"]
+LOG_LABELS = {"bpic2011": "BPIC11", "bpic2012a": "BPIC12-A", "bpic2012o": "BPIC12-O",
+              "bpic2012w": "BPIC12-W", "bpic20151": "BPIC15-1", "bpic20152": "BPIC15-2",
+              "bpic20153": "BPIC15-3", "bpic20154": "BPIC15-4", "bpic20155": "BPIC15-5",
+              "bpic2017": "BPIC17", "helpdesk": "Helpdesk", "hospital": "Hospital",
+              "production": "Production", "sepsis": "Sepsis", "traffic_fines": "RTFM"}
+MINUTE_LOGS = ["sepsis"]                           # MAE in minutes instead of days
+TABLE_PAIRS = [("LEaD-raw", "Base-last"), ("LEaD-raw", "Base-agg"), ("LEaD-raw", "Base-index"),
+               ("LEaD-full", "Base-last"), ("LEaD-full", "Base-agg"), ("LEaD-full", "Base-index"),
+               ("LEaD-full", "LEaD-raw")]
+PAPER_NAMES = {"LEaD-full": "LEaD-decomposed"}
+VF_COMPONENTS = [("vf_trend", r"$\mathit{VF}(T)$"), ("vf_seasonal", r"$\mathit{VF}(S)$"),
+                 ("vf_residual", r"$\mathit{VF}(R)$")]
+
+
+def summarize_refit_mae(run, variants=None):
+    """Mean and std (days) of the test MAE over the refit seeds of a run, per
+    log and configuration; NaN for a configuration with fewer than N_SEEDS seeds."""
+    res = pd.read_csv(os.path.join(RUNS_DIR, run, "refit.csv"), dtype=str)
+    res = res[res["dataset"] != "dataset"].drop_duplicates(["dataset", "variant", "seed"], keep="first")
+    res = res.astype({"mae": float})
+    if variants is not None:
+        res = res[res["variant"].isin(variants)]
+    s = res.groupby(["dataset", "variant"])["mae"].agg(["mean", "std", "count"])
+    s.loc[s["count"] < N_SEEDS, ["mean", "std"]] = np.nan
+    return s
+
+
+def format_mae_cell(mean, std, scale, decimals, bold=False, underline=False):
+    """'mean +- std' of one cell; bold and underline apply to the mean."""
+    if pd.isna(mean):
+        return "--"
+    m = f"{mean * scale:.{decimals}f}"
+    if bold:
+        m = rf"\textbf{{{m}}}"
+    if underline:
+        m = rf"\underline{{{m}}}"
+    return m + rf"{{\scriptsize$\pm${std * scale:.{decimals}f}}}"
+
+
+def build_mae_table_latex(decimals=1, lstm_run=LSTM_RUN):
+    """The MAE table of the paper (mean +- std over the refit seeds) as LaTeX,
+    and its numbers as a DataFrame. Per tree-based model and log, bold: the
+    LEaD configurations with a lower MAE than all baselines, or, if there is
+    none, the best baseline; underlined: the better LEaD configuration.
+    LSTM (lstm_run) bold: lower than both LEaD configurations of both
+    tree-based models. All comparisons on the unrounded means."""
+    tree = {m: summarize_refit_mae(TUNE_RUNS[m], [v for v, _ in TABLE_VARIANTS]) for m in TREE_MODELS}
+    lstm = summarize_refit_mae(lstm_run).groupby(level="dataset").first()
+    body, numbers = [], []
+    for ds in [d for d in LOG_ORDER if any(d in t.index.get_level_values(0) for t in tree.values())]:
+        scale = 1440.0 if ds in MINUTE_LOGS else 1.0
+        cells, leads_all = [LOG_LABELS.get(ds, ds)], []
+        for m, t in tree.items():
+            mean = {v: t["mean"].get((ds, v), np.nan) for v, _ in TABLE_VARIANTS}
+            std = {v: t["std"].get((ds, v), np.nan) for v, _ in TABLE_VARIANTS}
+            best_base = np.nanmin([mean[v] for v in TABLE_BASELINES])
+            winners = {v for v in TABLE_LEAD if mean[v] < best_base}
+            bold = winners or {min(TABLE_BASELINES, key=lambda v: np.inf if pd.isna(mean[v]) else mean[v])}
+            better = min(TABLE_LEAD, key=lambda v: np.inf if pd.isna(mean[v]) else mean[v])
+            leads_all += [mean[v] for v in TABLE_LEAD]
+            for v, label in TABLE_VARIANTS:
+                cells.append(format_mae_cell(mean[v], std[v], scale, decimals, v in bold, v == better))
+                numbers.append({"log": ds, "model": m, "configuration": label, "mean": mean[v], "std": std[v]})
+        lm, ls = lstm["mean"].get(ds, np.nan), lstm["std"].get(ds, np.nan)
+        cells.append(format_mae_cell(lm, ls, scale, decimals, bold=lm < np.nanmin(leads_all)))
+        numbers.append({"log": ds, "model": "lstm", "configuration": lstm_run, "mean": lm, "std": ls})
+        body.append(" & ".join(cells) + r" \\")
+    head = [r"\begin{table}[t]", r"\centering",
+            r"\caption{Mean MAE $\pm$ standard deviation in days (Sepsis: minutes) over five random seeds. "
+            r"Bold indicates the best baseline or a LEaD configuration outperforming all baselines within "
+            r"each tree-based model. For LSTM, bold indicates outperforming both LEaD configurations of both "
+            r"tree-based models. Underlining identifies the better LEaD configuration. Comparisons use "
+            r"unrounded MAEs.}",
+            r"\label{tab:mae-rf-xgb-lstm}", r"\fontsize{8}{9.5}\selectfont", r"\setlength{\tabcolsep}{2pt}",
+            r"\renewcommand{\arraystretch}{1.14}", r"\begin{adjustbox}{max width=\textwidth}",
+            r"\begin{tabular}{@{}lccccc|ccccc|c@{}}", r"\toprule",
+            r" & \multicolumn{5}{c|}{\textbf{Random forest}}", r" & \multicolumn{5}{c|}{\textbf{XGBoost}}",
+            r" & \textbf{LSTM} \\", r"\cmidrule{2-6}\cmidrule{7-11}",
+            r" & \multicolumn{3}{c}{Baselines}", r" & \multicolumn{2}{c|}{LEaD}",
+            r" & \multicolumn{3}{c}{Baselines}", r" & \multicolumn{2}{c|}{LEaD}", r" & \\",
+            r"\cmidrule(lr){2-4}\cmidrule(lr){5-6}", r"\cmidrule(lr){7-9}\cmidrule(lr){10-11}",
+            "Log & " + " & ".join(label for _, label in TABLE_VARIANTS) + "\n    & "
+            + " & ".join(label for _, label in TABLE_VARIANTS) + r" & \\", r"\midrule"]
+    tail = [r"\bottomrule", r"\end{tabular}", r"\end{adjustbox}", r"\end{table}"]
+    return "\n".join(head + body + tail) + "\n", pd.DataFrame(numbers)
+
+
+def test_gains_wilcoxon(gains, pairs=TABLE_PAIRS):
+    """One-sided Wilcoxon signed-rank test over the logs on the gains (%) of
+    each model, configuration and reference (alternative: the gain is
+    positive), without correction for multiple comparisons; effect size:
+    rank-biserial correlation r (> 0: the configuration is better)."""
+    from scipy.stats import rankdata, wilcoxon
+    rows = []
+    for model in gains["model"].unique():
+        for config, base in pairs:
+            g = gains[(gains["model"] == model) & (gains["config"] == config)
+                      & (gains["baseline"] == base)]["gain"].to_numpy()
+            if len(g) < 3:
+                continue
+            stat, p = wilcoxon(g, alternative="greater")
+            d = g[g != 0]
+            r = rankdata(np.abs(d))
+            rows.append({"model": model, "config": config, "baseline": base, "n_logs": len(g),
+                         "n_better": int((g > 0).sum()), "median_gain": float(np.median(g)),
+                         "statistic": stat, "p": p,
+                         "effect_size": (r[d > 0].sum() - r[d < 0].sum()) / r.sum()})
+    return pd.DataFrame(rows)
+
+
+def format_pair(config, base):
+    """Row label of a comparison, with the names of the paper."""
+    return f"{PAPER_NAMES.get(config, config)} $>$ {PAPER_NAMES.get(base, base)}"
+
+
+def build_wilcoxon_latex(tests):
+    """The table of the Wilcoxon tests of the paper as LaTeX (p with three
+    decimals, r with two)."""
+    t = tests.set_index(["model", "config", "baseline"])
+    body = []
+    for i, (config, base) in enumerate(TABLE_PAIRS):
+        if i in (3, 6):
+            body.append(r"\addlinespace[2pt]")
+        cells = [format_pair(config, base)]
+        for m in TREE_MODELS:
+            if (m, config, base) in t.index:
+                p, r = t.loc[(m, config, base), ["p", "effect_size"]]
+                cells += ["$<$0.001" if p < 0.0005 else f"{p:.3f}", f"{r:.2f}".replace("-", "$-$")]
+            else:
+                cells += ["--", "--"]
+        body.append(" & ".join(cells) + r" \\")
+    head = [r"\begin{table}[!htbp]", r"\centering",
+            r"\caption{One-sided Wilcoxon signed-rank tests over the 15 logs on the gain of the first "
+            r"configuration over the second (alternative: the gain is positive), without correction for "
+            r"multiple comparisons. $r$: rank-biserial correlation.}",
+            r"\label{tab:wilcoxon}", r"\scriptsize", r"\setlength{\tabcolsep}{4pt}",
+            r"\begin{tabular}{@{}lrrrr@{}}", r"\toprule",
+            r"& \multicolumn{2}{c}{\textbf{Random forest}} & \multicolumn{2}{c}{\textbf{XGBoost}} \\",
+            r"\cmidrule(lr){2-3} \cmidrule(l){4-5}", r"Comparison & $p$ & $r$ & $p$ & $r$ \\", r"\midrule"]
+    tail = [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(head + body + tail) + "\n"
+
+
+def build_correlation_latex(corr):
+    """The table of the Pearson correlations between the gains and the
+    variance fractions VF(T), VF(S) and VF(R) of each characteristic as
+    LaTeX, one panel per component."""
+    c = corr.set_index(["model", "config", "baseline", "characteristic"])
+    body = []
+    for j, (col, name) in enumerate(VF_COMPONENTS):
+        if j:
+            body.append(r"\midrule")
+        body.append(rf"\multicolumn{{7}}{{@{{}}l}}{{{name}}} \\")
+        for i, (config, base) in enumerate(TABLE_PAIRS):
+            if i in (3, 6):
+                body.append(r"\addlinespace[2pt]")
+            cells = [format_pair(config, base)]
+            for m in TREE_MODELS:
+                for ch in ("AC", "NC", "AR"):
+                    key = (m, config, base, ch)
+                    v = c.loc[key, f"correlation_{col}"] if key in c.index else np.nan
+                    cells.append("{--}" if pd.isna(v) else f"{v:+.2f}")
+            body.append(" & ".join(cells) + r" \\")
+    head = [r"\begin{table}[t]", r"\centering",
+            r"\caption{Pearson correlations over the logs between the gains and the variance fractions "
+            r"$\mathit{VF}(T)$, $\mathit{VF}(S)$ and $\mathit{VF}(R)$ of each characteristic.}",
+            r"\label{tab:corr-gains}", r"\scriptsize", r"\setlength{\tabcolsep}{4pt}",
+            r"\sisetup{retain-explicit-plus=true, table-format=+1.2}",
+            r"\begin{tabular}{@{}l*{3}{S}@{\hspace{10pt}}*{3}{S}@{}}", r"\toprule",
+            r"& \multicolumn{3}{c}{Random forest} & \multicolumn{3}{c}{XGBoost} \\",
+            r"\cmidrule(lr){2-4}\cmidrule(l){5-7}",
+            r"Comparison & {AC} & {NC} & {AR} & {AC} & {NC} & {AR} \\", r"\midrule"]
+    tail = [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(head + body + tail) + "\n"
+
+
+def build_fractions_latex(fractions):
+    """The table of the variance fractions VF(T), VF(S), VF(R) of each
+    characteristic per log (STL, p = 7, training period) as LaTeX."""
+    f = fractions.set_index(["dataset", "characteristic"])
+    body = []
+    for ds in [d for d in LOG_ORDER if d in f.index.get_level_values(0)]:
+        cells = [LOG_LABELS.get(ds, ds)]
+        for ch in ("AC", "NC", "AR"):
+            for col, _ in VF_COMPONENTS:
+                v = f[col].get((ds, ch), np.nan)
+                cells.append("--" if pd.isna(v) else f"{v:.2f}")
+        body.append(" & ".join(cells) + r" \\")
+    head = [r"\begin{table}[t]", r"\centering",
+            r"\caption{Variance fractions of the trend ($T$), seasonal ($S$) and residual ($R$) components "
+            r"(STL, $p = 7$) of each characteristic on the training period.}",
+            r"\label{tab:variance-fractions}", r"\scriptsize", r"\setlength{\tabcolsep}{4pt}",
+            r"\begin{tabular}{@{}l*{3}{ccc}@{}}", r"\toprule",
+            r"& \multicolumn{3}{c}{AC} & \multicolumn{3}{c}{NC} & \multicolumn{3}{c}{AR} \\",
+            r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(l){8-10}",
+            "Log" + r" & $T$ & $S$ & $R$" * 3 + r" \\", r"\midrule"]
+    tail = [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+    return "\n".join(head + body + tail) + "\n"
+
+
+def write_paper_tables():
+    """All tables of the paper as .tex (and their numbers as .csv) in
+    results/report/tables/, from the refit results of the runs."""
+    os.makedirs(TABLE_DIR, exist_ok=True)
+    gains = pd.concat([compute_gains(m) for m in TREE_MODELS], ignore_index=True)
+    logs = [ds for ds in LOG_ORDER if ds in set(gains["dataset"])]
+    fractions = compute_characteristic_fractions(logs)
+    corr = correlate_gains(gains, fractions)
+    tests = test_gains_wilcoxon(gains)
+    mae_tex, mae_numbers = build_mae_table_latex()
+    texts = {"tab_mae.tex": mae_tex, "tab_wilcoxon.tex": build_wilcoxon_latex(tests),
+             "tab_corr_gains.tex": build_correlation_latex(corr),
+             "tab_variance_fractions.tex": build_fractions_latex(fractions)}
+    for name, text in texts.items():
+        with open(os.path.join(TABLE_DIR, name), "w") as f:
+            f.write(text)
+    for name, frame in {"mae.csv": mae_numbers, "wilcoxon.csv": tests, "corr_gains.csv": corr,
+                        "gains.csv": gains, "variance_fractions.csv": fractions}.items():
+        frame.to_csv(os.path.join(TABLE_DIR, name), index=False)
+    print("written:", TABLE_DIR, sorted(texts) + ["mae.csv", "wilcoxon.csv", "corr_gains.csv",
+                                                  "gains.csv", "variance_fractions.csv"])
+
     
 def main():
     parser = argparse.ArgumentParser()

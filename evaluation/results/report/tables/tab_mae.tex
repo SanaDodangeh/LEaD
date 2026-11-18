@@ -1,0 +1,43 @@
+\begin{table}[t]
+\centering
+\caption{Mean MAE $\pm$ standard deviation in days (Sepsis: minutes) over five random seeds. Bold indicates the best baseline or a LEaD configuration outperforming all baselines within each tree-based model. For LSTM, bold indicates outperforming both LEaD configurations of both tree-based models. Underlining identifies the better LEaD configuration. Comparisons use unrounded MAEs.}
+\label{tab:mae-rf-xgb-lstm}
+\fontsize{8}{9.5}\selectfont
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.14}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lccccc|ccccc|c@{}}
+\toprule
+ & \multicolumn{5}{c|}{\textbf{Random forest}}
+ & \multicolumn{5}{c|}{\textbf{XGBoost}}
+ & \textbf{LSTM} \\
+\cmidrule{2-6}\cmidrule{7-11}
+ & \multicolumn{3}{c}{Baselines}
+ & \multicolumn{2}{c|}{LEaD}
+ & \multicolumn{3}{c}{Baselines}
+ & \multicolumn{2}{c|}{LEaD}
+ & \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}
+\cmidrule(lr){7-9}\cmidrule(lr){10-11}
+Log & Last & Agg & Index & Raw & Decomposed
+    & Last & Agg & Index & Raw & Decomposed & \\
+\midrule
+BPIC11 & 158.7{\scriptsize$\pm$1.6} & 180.9{\scriptsize$\pm$3.4} & 190.2{\scriptsize$\pm$1.9} & 178.1{\scriptsize$\pm$2.9} & \underline{\textbf{100.1}}{\scriptsize$\pm$0.6} & 158.0{\scriptsize$\pm$7.2} & 166.8{\scriptsize$\pm$4.0} & 163.9{\scriptsize$\pm$4.7} & \textbf{149.3}{\scriptsize$\pm$3.7} & \underline{\textbf{87.3}}{\scriptsize$\pm$2.0} & 190.9{\scriptsize$\pm$33.9} \\
+BPIC12-A & 4.4{\scriptsize$\pm$0.0} & 4.4{\scriptsize$\pm$0.0} & 4.4{\scriptsize$\pm$0.0} & \textbf{4.3}{\scriptsize$\pm$0.0} & \underline{\textbf{4.3}}{\scriptsize$\pm$0.0} & 4.3{\scriptsize$\pm$0.0} & 4.4{\scriptsize$\pm$0.0} & 4.4{\scriptsize$\pm$0.0} & \textbf{4.3}{\scriptsize$\pm$0.0} & \underline{\textbf{4.2}}{\scriptsize$\pm$0.0} & 4.9{\scriptsize$\pm$0.2} \\
+BPIC12-O & 6.5{\scriptsize$\pm$0.0} & 6.6{\scriptsize$\pm$0.0} & 6.4{\scriptsize$\pm$0.0} & \textbf{6.0}{\scriptsize$\pm$0.0} & \underline{\textbf{6.0}}{\scriptsize$\pm$0.0} & 6.1{\scriptsize$\pm$0.0} & 6.1{\scriptsize$\pm$0.0} & 6.0{\scriptsize$\pm$0.0} & 6.1{\scriptsize$\pm$0.0} & \underline{\textbf{5.8}}{\scriptsize$\pm$0.0} & 6.1{\scriptsize$\pm$0.3} \\
+BPIC12-W & 6.2{\scriptsize$\pm$0.0} & 6.4{\scriptsize$\pm$0.0} & 6.7{\scriptsize$\pm$0.0} & 6.2{\scriptsize$\pm$0.0} & \underline{\textbf{6.2}}{\scriptsize$\pm$0.0} & 6.2{\scriptsize$\pm$0.0} & 6.2{\scriptsize$\pm$0.0} & 6.7{\scriptsize$\pm$0.1} & \underline{\textbf{6.1}}{\scriptsize$\pm$0.0} & 6.2{\scriptsize$\pm$0.0} & 6.6{\scriptsize$\pm$0.2} \\
+BPIC15-1 & 40.2{\scriptsize$\pm$0.3} & 43.8{\scriptsize$\pm$0.3} & 41.2{\scriptsize$\pm$0.2} & \underline{\textbf{39.2}}{\scriptsize$\pm$0.3} & \textbf{39.3}{\scriptsize$\pm$0.3} & 42.0{\scriptsize$\pm$1.3} & \textbf{38.3}{\scriptsize$\pm$0.2} & 39.1{\scriptsize$\pm$0.6} & \underline{41.6}{\scriptsize$\pm$0.3} & 42.5{\scriptsize$\pm$0.7} & 42.8{\scriptsize$\pm$4.5} \\
+BPIC15-2 & 61.4{\scriptsize$\pm$0.4} & 63.2{\scriptsize$\pm$0.5} & 65.4{\scriptsize$\pm$1.1} & \underline{\textbf{60.2}}{\scriptsize$\pm$0.6} & 62.9{\scriptsize$\pm$0.3} & 62.3{\scriptsize$\pm$0.3} & 60.7{\scriptsize$\pm$0.7} & 61.1{\scriptsize$\pm$0.6} & \underline{\textbf{58.6}}{\scriptsize$\pm$0.9} & 63.5{\scriptsize$\pm$0.6} & 61.0{\scriptsize$\pm$1.6} \\
+BPIC15-3 & \textbf{20.7}{\scriptsize$\pm$0.0} & 20.8{\scriptsize$\pm$0.1} & 20.9{\scriptsize$\pm$0.1} & 21.2{\scriptsize$\pm$0.1} & \underline{20.7}{\scriptsize$\pm$0.0} & \textbf{19.1}{\scriptsize$\pm$0.2} & 19.6{\scriptsize$\pm$0.1} & 19.5{\scriptsize$\pm$0.3} & \underline{19.5}{\scriptsize$\pm$0.2} & 20.0{\scriptsize$\pm$0.3} & \textbf{17.3}{\scriptsize$\pm$0.4} \\
+BPIC15-4 & 42.2{\scriptsize$\pm$0.2} & 44.1{\scriptsize$\pm$0.2} & 44.9{\scriptsize$\pm$0.4} & 46.0{\scriptsize$\pm$0.5} & \underline{\textbf{40.7}}{\scriptsize$\pm$0.2} & 32.3{\scriptsize$\pm$0.5} & 33.8{\scriptsize$\pm$0.2} & 32.7{\scriptsize$\pm$0.3} & 33.7{\scriptsize$\pm$0.5} & \underline{\textbf{32.1}}{\scriptsize$\pm$0.4} & 40.4{\scriptsize$\pm$3.7} \\
+BPIC15-5 & 48.0{\scriptsize$\pm$0.2} & 47.5{\scriptsize$\pm$0.3} & 46.5{\scriptsize$\pm$0.2} & 46.9{\scriptsize$\pm$0.2} & \underline{\textbf{45.4}}{\scriptsize$\pm$0.3} & 44.3{\scriptsize$\pm$0.4} & 45.0{\scriptsize$\pm$0.3} & 47.2{\scriptsize$\pm$1.1} & \textbf{42.2}{\scriptsize$\pm$0.3} & \underline{\textbf{41.8}}{\scriptsize$\pm$0.4} & 44.7{\scriptsize$\pm$2.5} \\
+BPIC17 & 7.8{\scriptsize$\pm$0.0} & 7.9{\scriptsize$\pm$0.0} & 7.8{\scriptsize$\pm$0.0} & 7.9{\scriptsize$\pm$0.0} & \underline{\textbf{7.8}}{\scriptsize$\pm$0.0} & 7.8{\scriptsize$\pm$0.1} & 7.8{\scriptsize$\pm$0.0} & \textbf{7.7}{\scriptsize$\pm$0.0} & 7.8{\scriptsize$\pm$0.0} & \underline{7.8}{\scriptsize$\pm$0.0} & \textbf{7.5}{\scriptsize$\pm$0.0} \\
+Helpdesk & 5.0{\scriptsize$\pm$0.0} & 5.0{\scriptsize$\pm$0.0} & \textbf{5.0}{\scriptsize$\pm$0.0} & \underline{5.0}{\scriptsize$\pm$0.0} & 5.1{\scriptsize$\pm$0.0} & 5.0{\scriptsize$\pm$0.0} & 5.0{\scriptsize$\pm$0.0} & \textbf{5.0}{\scriptsize$\pm$0.0} & 5.1{\scriptsize$\pm$0.0} & \underline{5.0}{\scriptsize$\pm$0.0} & 5.1{\scriptsize$\pm$0.1} \\
+Hospital & 43.7{\scriptsize$\pm$0.1} & 43.0{\scriptsize$\pm$0.1} & \textbf{39.1}{\scriptsize$\pm$0.1} & \underline{40.6}{\scriptsize$\pm$0.1} & 42.5{\scriptsize$\pm$0.1} & 42.0{\scriptsize$\pm$0.3} & 40.4{\scriptsize$\pm$0.1} & \textbf{37.4}{\scriptsize$\pm$0.2} & \underline{42.6}{\scriptsize$\pm$0.5} & 45.3{\scriptsize$\pm$0.8} & 47.5{\scriptsize$\pm$1.0} \\
+Production & 10.4{\scriptsize$\pm$0.1} & 9.2{\scriptsize$\pm$0.1} & 9.4{\scriptsize$\pm$0.2} & \textbf{8.4}{\scriptsize$\pm$0.1} & \underline{\textbf{7.8}}{\scriptsize$\pm$0.2} & 10.7{\scriptsize$\pm$0.1} & 9.4{\scriptsize$\pm$0.2} & 9.4{\scriptsize$\pm$0.1} & \textbf{9.2}{\scriptsize$\pm$0.2} & \underline{\textbf{7.6}}{\scriptsize$\pm$0.2} & 7.7{\scriptsize$\pm$1.0} \\
+Sepsis & \textbf{15.3}{\scriptsize$\pm$0.0} & 15.4{\scriptsize$\pm$0.1} & 15.3{\scriptsize$\pm$0.0} & \underline{15.3}{\scriptsize$\pm$0.1} & 15.5{\scriptsize$\pm$0.0} & 15.6{\scriptsize$\pm$0.1} & \textbf{15.5}{\scriptsize$\pm$0.1} & 15.6{\scriptsize$\pm$0.0} & \underline{15.6}{\scriptsize$\pm$0.1} & 16.1{\scriptsize$\pm$0.1} & 23.2{\scriptsize$\pm$2.4} \\
+RTFM & \textbf{233.8}{\scriptsize$\pm$1.0} & 243.9{\scriptsize$\pm$0.4} & 241.5{\scriptsize$\pm$0.8} & \underline{236.1}{\scriptsize$\pm$0.8} & 240.1{\scriptsize$\pm$1.0} & \textbf{224.5}{\scriptsize$\pm$1.2} & 231.7{\scriptsize$\pm$0.6} & 235.9{\scriptsize$\pm$1.3} & \underline{224.6}{\scriptsize$\pm$0.5} & 228.8{\scriptsize$\pm$0.7} & 231.0{\scriptsize$\pm$2.2} \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
