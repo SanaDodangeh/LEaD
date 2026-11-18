@@ -1,0 +1,16 @@
+dataset,variant,units,layers,batch_size,optimizer,val_mae,epochs
+sepsis,Verenich-LSTM+F2+IC,200,3,32,nadam,0.017404966056346893,9
+production,Verenich-LSTM+F2+IC,200,2,32,nadam,5.842540264129639,7
+helpdesk,Verenich-LSTM+F2+IC,200,3,8,rmsprop,5.021723747253418,3
+bpic2012o,Verenich-LSTM+F2+IC,200,3,8,nadam,6.224176406860352,14
+bpic20154,Verenich-LSTM+F2+IC,200,3,32,rmsprop,51.614906311035156,14
+bpic20152,Verenich-LSTM+F2+IC,200,1,8,nadam,79.56097412109375,9
+bpic20151,Verenich-LSTM+F2+IC,200,3,32,nadam,44.279117584228516,20
+bpic2011,Verenich-LSTM+F2+IC,200,1,8,nadam,133.06288146972656,4
+bpic2012a,Verenich-LSTM+F2+IC,100,3,32,rmsprop,7.682407855987549,23
+bpic20155,Verenich-LSTM+F2+IC,200,1,32,nadam,57.87745666503906,16
+bpic20153,Verenich-LSTM+F2+IC,100,3,32,nadam,32.18260192871094,6
+bpic2012w,Verenich-LSTM+F2+IC,200,3,32,nadam,7.582311630249023,10
+hospital,Verenich-LSTM+F2+IC,100,3,32,rmsprop,40.75035858154297,20
+traffic_fines,Verenich-LSTM+F2+IC,100,2,32,nadam,254.80441284179688,1
+bpic2017,Verenich-LSTM+F2+IC,100,3,32,rmsprop,7.157826900482178,5
